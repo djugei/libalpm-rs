@@ -1,0 +1,8 @@
+[package]
+name = "libalpm-rs"
+version = "0.1.0"
+edition = "2024"
+authors = ["djugei"]
+description = "partial cleanroom re-implementation of libalpm functionality"
+
+[dependencies]
