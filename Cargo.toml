@@ -6,3 +6,6 @@ authors = ["djugei"]
 description = "partial cleanroom re-implementation of libalpm functionality"
 
 [dependencies]
+nom = "*"
+monoio = "*"
+string-interner = "*"
