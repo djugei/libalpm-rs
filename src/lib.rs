@@ -111,7 +111,7 @@ pub struct Package {
 impl Package {
     pub fn from_str(i: Interner, s: &str) -> Result<Self, ()> {
         use std::cell::RefMut;
-        let m = map(s).unwrap();
+        let m = parse_to_map(s).unwrap();
         //TODO: clone can be avoided if the package construction is done in 2 steps
         let ii = i.clone();
         let mut ir = i.borrow_mut();
@@ -222,7 +222,7 @@ fn list(i: &str) -> IResult<&str, Vec<(&str, &str)>> {
     separated_list0(tag("\n\n"), entry).parse(i)
 }
 
-fn map(i: &str) -> Result<HashMap<&str, &str>, nom::Err<Error<&str>>> {
+pub fn parse_to_map(i: &str) -> Result<HashMap<&str, &str>, nom::Err<Error<&str>>> {
     let (r, h) = list(i).map(|(r, v)| (r, v.into_iter().collect()))?;
     assert_eq!(r, "\n\n");
     Ok(h)
@@ -307,4 +307,5 @@ fn test_monoio_local() {
     });
     i.borrow_mut().shrink_to_fit();
     println!("l: {}", i.borrow().len());
+    // ~170ms
 }
