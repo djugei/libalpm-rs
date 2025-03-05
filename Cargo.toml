@@ -7,5 +7,10 @@ description = "partial cleanroom re-implementation of libalpm functionality"
 
 [dependencies]
 nom = "*"
-monoio = "*"
 string-interner = "*"
+base64 = "*"
+
+[dev-dependencies]
+monoio = "*"
+local-sync = "*"
+rlimit = "*"
