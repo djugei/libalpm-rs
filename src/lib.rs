@@ -17,7 +17,6 @@ use nom::{IResult, Parser};
 use string_interner::DefaultStringInterner;
 use string_interner::DefaultSymbol as Istr;
 use string_interner::StringInterner;
-//check alpm version on entry functions
 
 type Interner = Rc<RefCell<DefaultStringInterner>>;
 
@@ -109,6 +108,7 @@ pub struct Package {
 }
 
 impl Package {
+    //TODO: custom error type, no more unwraps
     pub fn from_str(i: Interner, s: &str) -> Result<Self, ()> {
         use std::cell::RefMut;
         let m = parse_to_map(s).unwrap();
@@ -204,9 +204,7 @@ impl Package {
             ] {
                 m.remove(token);
             }
-            if m.len() > 0 {
-                panic!("{:#?}", m);
-            }
+            assert!(m.is_empty(), "{m:#?}");
         }
         Ok(s)
     }
@@ -229,11 +227,66 @@ pub fn parse_to_map(i: &str) -> Result<HashMap<&str, &str>, nom::Err<Error<&str>
 }
 
 //TODO: work on tars
+pub fn parse_localdb(i: Interner) -> std::io::Result<HashMap<Istr, Package>> {
+    let lim = rlimit::increase_nofile_limit(u64::MAX).unwrap() - 100;
+    let sem = local_sync::semaphore::Semaphore::new(lim as usize);
+    let sem = Rc::new(sem);
+
+    let pkgs = monoio::start::<monoio::IoUringDriver, _>(async {
+        let path = "/var/lib/pacman/local/";
+
+        let v = monoio::fs::read(format!("{path}/ALPM_DB_VERSION")).await?;
+        let e = "invalid version";
+        let v = String::from_utf8(v).expect(e);
+        let v: u64 = v.trim().parse().expect(e);
+        assert_eq!(v, 9, "{e}");
+
+        let mut futs = Vec::new();
+        for dir in std::fs::read_dir(path).unwrap() {
+            let dir = dir.unwrap();
+            if !dir.metadata().unwrap().is_dir() {
+                continue;
+            }
+            let desc = dir.path().join("desc");
+
+            let i = i.clone();
+            let sem = sem.clone();
+            futs.push(monoio::spawn(async move {
+                let lock = sem.acquire().await.unwrap();
+                let s = monoio::fs::read(desc).await.unwrap();
+                let s = String::from_utf8(s).unwrap();
+                let pkg = Package::from_str(i.clone(), &s).unwrap();
+                std::mem::drop(lock);
+                pkg
+            }));
+        }
+        let mut pkgs = HashMap::new();
+        for f in futs {
+            let pkg = f.await;
+            pkgs.insert(pkg.name, pkg);
+        }
+        Ok(pkgs)
+    });
+    i.borrow_mut().shrink_to_fit();
+    pkgs
+    // ~170ms
+}
+
+#[test]
+fn test_monoio_localdb() {
+    let ts = SystemTime::now();
+    assert!(parse_localdb(Interner::default()).is_ok());
+    let passed = SystemTime::now().duration_since(ts).unwrap();
+    println!("took {passed:?} seconds");
+}
+
+#[cfg(test)]
+const DBPATH: &'static str = "/var/lib/pacman/local/";
 
 #[test]
 fn test_entry() {
     use std::io::Read;
-    let mut f = std::fs::File::open("desc").unwrap();
+    let mut f = std::fs::File::open("/var/lib/pacman/local/base-3-2/desc").unwrap();
     let mut s = Default::default();
     f.read_to_string(&mut s).unwrap();
     let (_, (h, v)) = entry(&s).unwrap();
@@ -243,17 +296,13 @@ fn test_entry() {
 #[test]
 fn test_list() {
     use std::io::Read;
-    let mut f =
-        std::fs::File::open("/var/lib/pacman/local/deltaclient-git-r129.60fbd27-1/desc").unwrap();
+    let mut f = std::fs::File::open("/var/lib/pacman/local/base-3-2/desc").unwrap();
     let mut s = Default::default();
     f.read_to_string(&mut s).unwrap();
     let (r, l) = list(&s).unwrap();
     dbg!(l, r);
 }
 
-#[cfg(test)]
-//const DBPATH: &'static str = "/var/lib/pacman/local/";
-const DBPATH: &'static str = "/home/work/x/";
 #[test]
 fn test_local() {
     use std::io::Read;
@@ -273,39 +322,4 @@ fn test_local() {
     i.borrow_mut().shrink_to_fit();
     println!("l: {}", i.borrow().len());
     //~2.4 sec
-}
-
-#[test]
-fn test_monoio_local() {
-    let lim = rlimit::increase_nofile_limit(u64::MAX).unwrap() - 100;
-    let sem = local_sync::semaphore::Semaphore::new(lim as usize);
-    let sem = Rc::new(sem);
-
-    let i = Interner::default();
-    monoio::start::<monoio::IoUringDriver, _>(async {
-        let mut futs = Vec::new();
-        for dir in std::fs::read_dir(DBPATH).unwrap() {
-            let dir = dir.unwrap();
-            if !dir.metadata().unwrap().is_dir() {
-                continue;
-            }
-            let desc = dir.path().join("desc");
-
-            let i = i.clone();
-            let sem = sem.clone();
-            futs.push(monoio::spawn(async move {
-                let lock = sem.acquire().await.unwrap();
-                let s = monoio::fs::read(desc).await.unwrap();
-                let s = String::from_utf8(s).unwrap();
-                let _pkg = Package::from_str(i.clone(), &s).unwrap();
-                std::mem::drop(lock);
-            }));
-        }
-        for f in futs {
-            f.await;
-        }
-    });
-    i.borrow_mut().shrink_to_fit();
-    println!("l: {}", i.borrow().len());
-    // ~170ms
 }

@@ -9,8 +9,8 @@ description = "partial cleanroom re-implementation of libalpm functionality"
 nom = "*"
 string-interner = "*"
 base64 = "*"
-
-[dev-dependencies]
 monoio = "*"
 local-sync = "*"
 rlimit = "*"
+
+[dev-dependencies]
