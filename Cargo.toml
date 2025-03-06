@@ -14,3 +14,6 @@ local-sync = "*"
 rlimit = "*"
 
 [dev-dependencies]
+
+[profile.dev]
+opt-level = 1

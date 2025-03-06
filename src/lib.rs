@@ -19,10 +19,16 @@ use string_interner::DefaultSymbol as Istr;
 use string_interner::StringInterner;
 
 type Interner = Rc<RefCell<DefaultStringInterner>>;
+pub fn new_interner() -> Interner {
+    let i = StringInterner::<_>::new();
+    Rc::new(RefCell::new(i))
+}
 
 pub enum Validation {
-    None,
-    PGP,
+    None = 1,
+    Md5Sum = 1 << 1,
+    Sha256Sum = 1 << 2,
+    Signature = 1 << 3,
 }
 
 impl FromStr for Validation {
@@ -31,7 +37,7 @@ impl FromStr for Validation {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "none" => Ok(Self::None),
-            "pgp" => Ok(Self::PGP),
+            "pgp" => Ok(Self::Signature),
             _ => Err(()),
         }
     }
@@ -78,6 +84,7 @@ pub struct Package {
     pub version: Istr,
     pub arch: Arch,
 
+    // explicit = 0, depend = 1, unknown = 2
     pub reason: Option<u8>,
     pub install_date: Option<SystemTime>,
     pub validation: Option<Validation>,
