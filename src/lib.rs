@@ -238,45 +238,29 @@ const LOCAL_DBPATH: &'static str = "/var/lib/pacman/local/";
 const SYNC_DBPATH: &'static str = "/var/lib/pacman/sync/";
 
 pub fn parse_localdb(i: Interner) -> std::io::Result<HashMap<Istr, Package>> {
-    let lim = rlimit::increase_nofile_limit(u64::MAX).unwrap() - 100;
-    let sem = local_sync::semaphore::Semaphore::new(lim as usize);
-    let sem = Rc::new(sem);
+    let v = std::fs::read(format!("{LOCAL_DBPATH}/ALPM_DB_VERSION"))?;
+    let e = "invalid version";
+    let v = String::from_utf8(v).expect(e);
+    let v: u64 = v.trim().parse().expect(e);
+    assert_eq!(v, 9, "{e}");
 
-    let pkgs = monoio::start::<monoio::IoUringDriver, _>(async {
-        let v = monoio::fs::read(format!("{LOCAL_DBPATH}/ALPM_DB_VERSION")).await?;
-        let e = "invalid version";
-        let v = String::from_utf8(v).expect(e);
-        let v: u64 = v.trim().parse().expect(e);
-        assert_eq!(v, 9, "{e}");
-
-        let mut futs = Vec::new();
-        for dir in std::fs::read_dir(LOCAL_DBPATH).unwrap() {
-            let dir = dir.unwrap();
-            if !dir.metadata().unwrap().is_dir() {
-                continue;
-            }
-            let desc = dir.path().join("desc");
-
-            let i = i.clone();
-            let sem = sem.clone();
-            futs.push(monoio::spawn(async move {
-                let lock = sem.acquire().await.unwrap();
-                let s = monoio::fs::read(desc).await.unwrap();
-                let s = String::from_utf8(s).unwrap();
-                let pkg = Package::from_str(i.clone(), &s).unwrap();
-                std::mem::drop(lock);
-                pkg
-            }));
+    let mut s = String::with_capacity(32_000);
+    let mut pkgs = HashMap::new();
+    for dir in std::fs::read_dir(LOCAL_DBPATH).unwrap() {
+        let dir = dir.unwrap();
+        if !dir.metadata().unwrap().is_dir() {
+            continue;
         }
-        let mut pkgs = HashMap::new();
-        for f in futs {
-            let pkg = f.await;
-            pkgs.insert(pkg.name, pkg);
-        }
-        Ok(pkgs)
-    });
-    i.borrow_mut().shrink_to_fit();
-    pkgs
+
+        let desc = dir.path().join("desc");
+        let mut desc = std::fs::File::open(desc)?;
+        s.clear();
+        desc.read_to_string(&mut s)?;
+
+        let pkg = Package::from_str(i.clone(), &s).unwrap();
+        pkgs.insert(pkg.name, pkg);
+    }
+    Ok(pkgs)
 }
 
 pub fn parse_syncdb(i: Interner, name: &str) -> std::io::Result<HashMap<Istr, Package>> {
@@ -324,18 +308,7 @@ fn test_syncdb() {
     println!("extra done");
 
     let passed = SystemTime::now().duration_since(ts).unwrap();
-    println!("took {passed:?} seconds");
-}
-
-#[test]
-fn test_monoio_localdb() {
-    let ts = SystemTime::now();
-    let i = new_interner();
-    assert!(parse_localdb(i.clone()).is_ok());
-    i.borrow_mut().shrink_to_fit();
-    println!("mono interning: {}", i.borrow().len());
-    let passed = SystemTime::now().duration_since(ts).unwrap();
-    println!("mono took {passed:?} seconds");
+    println!("syncdb took {passed:?} seconds");
 }
 
 #[test]
@@ -344,8 +317,7 @@ fn test_entry() {
     let mut f = std::fs::File::open("/var/lib/pacman/local/base-3-2/desc").unwrap();
     let mut s = Default::default();
     f.read_to_string(&mut s).unwrap();
-    let (_, (h, v)) = entry(&s).unwrap();
-    dbg!(h, v);
+    let (_, (_h, _v)) = entry(&s).unwrap();
 }
 
 #[test]
@@ -354,28 +326,14 @@ fn test_list() {
     let mut f = std::fs::File::open("/var/lib/pacman/local/base-3-2/desc").unwrap();
     let mut s = Default::default();
     f.read_to_string(&mut s).unwrap();
-    let (r, l) = list(&s).unwrap();
-    dbg!(l, r);
+    let (_r, _l) = list(&s).unwrap();
 }
 
 #[test]
 fn test_local() {
     let ts = SystemTime::now();
-    use std::io::Read;
-    let mut s = String::new();
     let i = new_interner();
-    for dir in std::fs::read_dir(LOCAL_DBPATH).unwrap() {
-        let dir = dir.unwrap();
-        if !dir.metadata().unwrap().is_dir() {
-            continue;
-        }
-        let desc = dir.path().join("desc");
-
-        let mut f = std::fs::File::open(desc).unwrap();
-        s.clear();
-        f.read_to_string(&mut s).unwrap();
-        let _pkg = Package::from_str(i.clone(), &s).unwrap();
-    }
+    parse_localdb(i.clone()).unwrap();
     i.borrow_mut().shrink_to_fit();
     println!("local interning: {}", i.borrow().len());
     let passed = SystemTime::now().duration_since(ts).unwrap();
