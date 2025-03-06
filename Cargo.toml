@@ -9,9 +9,13 @@ description = "partial cleanroom re-implementation of libalpm functionality"
 nom = "*"
 string-interner = "*"
 base64 = "*"
+
 monoio = "*"
 local-sync = "*"
 rlimit = "*"
+
+flate2 = "*"
+tar = "*"
 
 [dev-dependencies]
 

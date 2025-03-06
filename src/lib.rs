@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::Read;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::time::Duration;
@@ -233,23 +234,23 @@ pub fn parse_to_map(i: &str) -> Result<HashMap<&str, &str>, nom::Err<Error<&str>
     Ok(h)
 }
 
-//TODO: work on tars
+const LOCAL_DBPATH: &'static str = "/var/lib/pacman/local/";
+const SYNC_DBPATH: &'static str = "/var/lib/pacman/sync/";
+
 pub fn parse_localdb(i: Interner) -> std::io::Result<HashMap<Istr, Package>> {
     let lim = rlimit::increase_nofile_limit(u64::MAX).unwrap() - 100;
     let sem = local_sync::semaphore::Semaphore::new(lim as usize);
     let sem = Rc::new(sem);
 
     let pkgs = monoio::start::<monoio::IoUringDriver, _>(async {
-        let path = "/var/lib/pacman/local/";
-
-        let v = monoio::fs::read(format!("{path}/ALPM_DB_VERSION")).await?;
+        let v = monoio::fs::read(format!("{LOCAL_DBPATH}/ALPM_DB_VERSION")).await?;
         let e = "invalid version";
         let v = String::from_utf8(v).expect(e);
         let v: u64 = v.trim().parse().expect(e);
         assert_eq!(v, 9, "{e}");
 
         let mut futs = Vec::new();
-        for dir in std::fs::read_dir(path).unwrap() {
+        for dir in std::fs::read_dir(LOCAL_DBPATH).unwrap() {
             let dir = dir.unwrap();
             if !dir.metadata().unwrap().is_dir() {
                 continue;
@@ -279,16 +280,64 @@ pub fn parse_localdb(i: Interner) -> std::io::Result<HashMap<Istr, Package>> {
     // ~170ms
 }
 
+pub fn parse_syncdb(i: Interner, name: &str) -> std::io::Result<HashMap<Istr, Package>> {
+    let dbfile = format!("{SYNC_DBPATH}/{name}.db");
+    let dbfile = std::fs::File::open(dbfile)?;
+    let mut dbfile = flate2::read::GzDecoder::new(dbfile);
+
+    let mut archive = Vec::new();
+    dbfile.read_to_end(&mut archive)?;
+    let seek_archive = std::io::Cursor::new(&archive);
+    let mut seek_archive = tar::Archive::new(seek_archive);
+
+    let mut pkgs = HashMap::new();
+    for entry in seek_archive.entries_with_seek()? {
+        let entry = entry?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+
+        // Avoid a copy by indexing into the archive
+        let start = entry.raw_file_position() as usize;
+        let size = entry.size() as usize;
+        let end = start + size;
+        let slice = &archive[start..end];
+        let s = std::str::from_utf8(slice).unwrap();
+
+        let pkg = Package::from_str(i.clone(), &s).expect("package parsing failed");
+        pkgs.insert(pkg.name, pkg);
+    }
+
+    Ok(pkgs)
+}
+
 #[test]
-fn test_monoio_localdb() {
+fn test_syncdb() {
     let ts = SystemTime::now();
-    assert!(parse_localdb(Interner::default()).is_ok());
+
+    let i = new_interner();
+
+    let _core = parse_syncdb(i.clone(), "core").unwrap();
+    println!("core done");
+    let _multilib = parse_syncdb(i.clone(), "multilib").unwrap();
+    println!("multilib done");
+    let _extra = parse_syncdb(i.clone(), "extra").unwrap();
+    println!("extra done");
+
     let passed = SystemTime::now().duration_since(ts).unwrap();
     println!("took {passed:?} seconds");
 }
 
-#[cfg(test)]
-const DBPATH: &'static str = "/var/lib/pacman/local/";
+#[test]
+fn test_monoio_localdb() {
+    let ts = SystemTime::now();
+    let i = new_interner();
+    assert!(parse_localdb(i.clone()).is_ok());
+    i.borrow_mut().shrink_to_fit();
+    println!("mono interning: {}", i.borrow().len());
+    let passed = SystemTime::now().duration_since(ts).unwrap();
+    println!("mono took {passed:?} seconds");
+}
 
 #[test]
 fn test_entry() {
@@ -312,10 +361,11 @@ fn test_list() {
 
 #[test]
 fn test_local() {
+    let ts = SystemTime::now();
     use std::io::Read;
     let mut s = String::new();
-    let i = Interner::default();
-    for dir in std::fs::read_dir(DBPATH).unwrap() {
+    let i = new_interner();
+    for dir in std::fs::read_dir(LOCAL_DBPATH).unwrap() {
         let dir = dir.unwrap();
         if !dir.metadata().unwrap().is_dir() {
             continue;
@@ -327,6 +377,8 @@ fn test_local() {
         let _pkg = Package::from_str(i.clone(), &s).unwrap();
     }
     i.borrow_mut().shrink_to_fit();
-    println!("l: {}", i.borrow().len());
+    println!("local interning: {}", i.borrow().len());
+    let passed = SystemTime::now().duration_since(ts).unwrap();
+    println!("local took {passed:?} seconds");
     //~2.4 sec
 }
