@@ -277,7 +277,6 @@ pub fn parse_localdb(i: Interner) -> std::io::Result<HashMap<Istr, Package>> {
     });
     i.borrow_mut().shrink_to_fit();
     pkgs
-    // ~170ms
 }
 
 pub fn parse_syncdb(i: Interner, name: &str) -> std::io::Result<HashMap<Istr, Package>> {
@@ -373,6 +372,7 @@ fn test_local() {
         let desc = dir.path().join("desc");
 
         let mut f = std::fs::File::open(desc).unwrap();
+        s.clear();
         f.read_to_string(&mut s).unwrap();
         let _pkg = Package::from_str(i.clone(), &s).unwrap();
     }
@@ -380,5 +380,4 @@ fn test_local() {
     println!("local interning: {}", i.borrow().len());
     let passed = SystemTime::now().duration_since(ts).unwrap();
     println!("local took {passed:?} seconds");
-    //~2.4 sec
 }
