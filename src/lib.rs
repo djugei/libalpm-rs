@@ -17,12 +17,9 @@ use nom::bytes::complete::tag;
 use nom::bytes::complete::take_until;
 use nom::bytes::complete::take_while;
 use nom::bytes::complete::take_while1;
-use nom::character::complete::anychar;
 use nom::character::complete::satisfy;
 use nom::character::complete::{alphanumeric1, char, newline};
-use nom::combinator::map_parser;
 use nom::combinator::opt;
-use nom::combinator::recognize;
 use nom::error::Error;
 use nom::multi::many1;
 use nom::multi::separated_list0;
@@ -363,29 +360,33 @@ type Version<'v> = (
     Option<Vec<Result<&'v str, u64>>>,
 );
 
-#[inline]
-pub fn versionparse(i: &str) -> IResult<&str, Version> {
+//TODO: do not allocate, this is pretty wasteful overall!
+#[inline(always)]
+pub fn versionparse(i: &str) -> IResult<&str, Version, ()> {
     let epoch = (take_while(|c: char| c.is_numeric()), char(':'))
         .map(|i| i.0)
         .map_res(|s| u64::from_str(s));
-    let version = recognize(terminated(many1(anychar), opt(char('-'))));
-    let release = recognize(many1(anychar));
-
     let (i, epoch) = opt(epoch).parse(i)?;
-    dbg!(i);
-    let (i, version) = map_parser(version, version_segment_parse).parse(i)?;
-    dbg!(i);
-    let (i, release) = opt(map_parser(release, version_segment_parse)).parse(i)?;
 
-    Ok((i, (epoch, version, release)))
+    let (pre, post) = if let Some((pre, post)) = i.rsplit_once('-') {
+        (pre, Some(post))
+    } else {
+        (i, None)
+    };
+
+    let (v_rem, version) = version_segment_parse(pre)?;
+    let release = post.map(version_segment_parse).transpose()?;
+    let (r_rem, release) = release.unzip();
+
+    Ok((r_rem.unwrap_or(v_rem), (epoch, version, release)))
 }
 
-#[inline]
-fn version_segment_parse(i: &str) -> IResult<&str, Vec<Result<&str, u64>>> {
+#[inline(always)]
+fn version_segment_parse(i: &str) -> IResult<&str, Vec<Result<&str, u64>>, ()> {
     many1(
         terminated(
             take_while1(|c: char| c.is_alphanum()),
-            satisfy(|c| !c.is_alphanumeric()),
+            opt(satisfy(|c| !c.is_alphanumeric())),
         )
         .map(|segment| match u64::from_str(segment) {
             Ok(n) => Err(n),
@@ -395,10 +396,18 @@ fn version_segment_parse(i: &str) -> IResult<&str, Vec<Result<&str, u64>>> {
     .parse(i)
 }
 
+pub fn versioncmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (_res, va) = versionparse(a).unwrap();
+    let (_res, vb) = versionparse(b).unwrap();
+
+    va.cmp(&vb)
+}
+
 #[test]
 fn test_version() {
     let v1 = "2025.Q1.2-1";
     let (_rem, (epoch, version, release)) = versionparse(v1).finish().unwrap();
+    println!("{epoch:?} {version:?} {release:?}");
     assert!(epoch.is_none());
     assert_eq!(version.len(), 3);
     println!("{version:?}");
@@ -426,10 +435,47 @@ fn test_versions() {
                     println!("error parsing {v} as version: {e}");
                     error += 1;
                 }
-                Ok((i, r)) => {
+                Ok((i, (epoch, version, release))) => {
                     if !i.is_empty() {
-                        println!("{i} remaining after parsing {v} as {r:?}");
+                        println!(
+                            "{i} remaining after parsing {v} as {epoch:?} {version:?} {release:?}"
+                        );
                         error += 1;
+                    }
+
+                    // Try to reconstruct the version string
+                    let mut s = epoch.map(|e| format!("{e}:")).unwrap_or_default();
+                    let vs = version
+                        .into_iter()
+                        .map(|e| match e {
+                            Ok(v) => v.to_owned(),
+                            Err(v) => v.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    s.push_str(&vs);
+                    s.push('-');
+                    if let Some(release) = release {
+                        let rs = release
+                            .into_iter()
+                            .map(|e| match e {
+                                Ok(v) => v.to_owned(),
+                                Err(v) => v.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(".");
+                        s.push_str(&rs);
+                    }
+                    // leading zeroes are not preserved
+                    s.retain(|c| c != '0');
+                    let mut v = v.to_string();
+                    v.retain(|c| c != '0');
+                    // Separators are not preserved, so we can only match length
+                    if v.len() != s.len() {
+                        println!("v: {v}");
+                        println!("s: {s}");
+                        println!();
+                        error += 1
                     }
                 }
             }
