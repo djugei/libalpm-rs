@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Read;
+use std::ops::Deref;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::time::Duration;
@@ -19,7 +21,8 @@ use string_interner::DefaultStringInterner;
 use string_interner::DefaultSymbol as Istr;
 use string_interner::StringInterner;
 
-type Interner = Rc<RefCell<DefaultStringInterner>>;
+type InnerInterner = DefaultStringInterner;
+type Interner = Rc<RefCell<InnerInterner>>;
 pub fn new_interner() -> Interner {
     let i = StringInterner::<_>::new();
     Rc::new(RefCell::new(i))
@@ -109,7 +112,7 @@ pub struct Package {
     pub makedepends: Option<Vec<Istr>>,
     pub checkdepends: Option<Vec<Istr>>,
     pub groups: Option<Vec<Istr>>,
-    pub replaces: Option<Vec<Istr>>,
+    pub replaces: Option<HashSet<Istr>>,
     pub conflicts: Option<Vec<Istr>>,
 
     pub xdata: Option<XData>,
@@ -172,7 +175,7 @@ impl Package {
             provides: intern_list("PROVIDES", &mut ir),
 
             groups: intern_list("GROUPS", &mut ir),
-            replaces: intern_list("REPLACES", &mut ir),
+            replaces: intern_list("REPLACES", &mut ir).map(|l| l.into_iter().collect()),
             conflicts: intern_list("CONFLICTS", &mut ir),
             xdata: m.get("XDATA").map(|s| XData::from_str(s).unwrap()),
             interner: ii,
@@ -292,6 +295,64 @@ pub fn parse_syncdb(i: Interner, name: &str) -> std::io::Result<HashMap<Istr, Pa
     }
 
     Ok(pkgs)
+}
+
+pub fn update_candidates() {
+    let i = new_interner();
+    let local = parse_localdb(i.clone()).unwrap();
+
+    let syncs =
+        ["core", "extra", "multilib"].map(|name| (name, parse_syncdb(i.clone(), name).unwrap()));
+    i.borrow_mut().shrink_to_fit();
+    let i = i.borrow();
+    let mut upgrades = Vec::new();
+    for (name, package) in local.iter() {
+        for (dbname, db) in &syncs {
+            for (sync_name, sync_package) in db {
+                let is_upgrade = if *sync_name == *name {
+                    versioncmp(package.version.r(&i), sync_package.version.r(&i))
+                } else if let Some(r) = &sync_package.replaces {
+                    r.contains(name)
+                } else {
+                    false
+                };
+
+                if is_upgrade {
+                    upgrades.push((
+                        *dbname,
+                        *name,
+                        package.version,
+                        *sync_name,
+                        sync_package.version,
+                    ));
+                }
+            }
+        }
+    }
+}
+
+trait QuickResolve {
+    fn r<'i, I: Deref<Target = InnerInterner>>(self, i: &'i I) -> &'i str;
+}
+
+impl QuickResolve for Istr {
+    fn r<'i, I: Deref<Target = InnerInterner>>(self, i: &'i I) -> &'i str {
+        i.deref().resolve(self).unwrap()
+    }
+}
+
+// true if a < b
+fn versioncmp(a: &str, b: &str) -> bool {
+    //TODO: versioncmp
+    a < b
+}
+
+#[test]
+fn test_update() {
+    let ts = SystemTime::now();
+    update_candidates();
+    let passed = SystemTime::now().duration_since(ts).unwrap();
+    println!("update_candidates took {passed:?} seconds");
 }
 
 #[test]
