@@ -11,10 +11,22 @@ use std::time::UNIX_EPOCH;
 
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD_NO_PAD as B64;
-use nom::bytes::complete::{tag, take_until};
+use nom::AsChar;
+use nom::Finish;
+use nom::bytes::complete::tag;
+use nom::bytes::complete::take_until;
+use nom::bytes::complete::take_while;
+use nom::bytes::complete::take_while1;
+use nom::character::complete::anychar;
+use nom::character::complete::satisfy;
 use nom::character::complete::{alphanumeric1, char, newline};
+use nom::combinator::map_parser;
+use nom::combinator::opt;
+use nom::combinator::recognize;
 use nom::error::Error;
+use nom::multi::many1;
 use nom::multi::separated_list0;
+use nom::sequence::terminated;
 use nom::sequence::{delimited, pair};
 use nom::{IResult, Parser};
 use string_interner::DefaultStringInterner;
@@ -297,8 +309,7 @@ pub fn parse_syncdb(i: Interner, name: &str) -> std::io::Result<HashMap<Istr, Pa
     Ok(pkgs)
 }
 
-pub fn update_candidates() {
-    let i = new_interner();
+pub fn update_candidates(i: &Interner) -> Vec<(&str, Istr, Istr, Istr, Istr)> {
     let local = parse_localdb(i.clone()).unwrap();
 
     let syncs =
@@ -307,10 +318,14 @@ pub fn update_candidates() {
     let i = i.borrow();
     let mut upgrades = Vec::new();
     for (name, package) in local.iter() {
+        let package_version = package.version.r(&i);
+        let package_version = versionparse(package_version).finish().unwrap();
         for (dbname, db) in &syncs {
             for (sync_name, sync_package) in db {
                 let is_upgrade = if *sync_name == *name {
-                    versioncmp(package.version.r(&i), sync_package.version.r(&i))
+                    let sync_package_version = sync_package.version.r(&i);
+                    let sync_package_version = versionparse(sync_package_version).finish().unwrap();
+                    package_version < sync_package_version
                 } else if let Some(r) = &sync_package.replaces {
                     r.contains(name)
                 } else {
@@ -329,6 +344,7 @@ pub fn update_candidates() {
             }
         }
     }
+    upgrades
 }
 
 trait QuickResolve {
@@ -341,16 +357,106 @@ impl QuickResolve for Istr {
     }
 }
 
-// true if a < b
-fn versioncmp(a: &str, b: &str) -> bool {
-    //TODO: versioncmp
-    a < b
+type Version<'v> = (
+    Option<u64>,
+    Vec<Result<&'v str, u64>>,
+    Option<Vec<Result<&'v str, u64>>>,
+);
+
+#[inline]
+pub fn versionparse(i: &str) -> IResult<&str, Version> {
+    let epoch = (take_while(|c: char| c.is_numeric()), char(':'))
+        .map(|i| i.0)
+        .map_res(|s| u64::from_str(s));
+    let version = recognize(terminated(many1(anychar), opt(char('-'))));
+    let release = recognize(many1(anychar));
+
+    let (i, epoch) = opt(epoch).parse(i)?;
+    dbg!(i);
+    let (i, version) = map_parser(version, version_segment_parse).parse(i)?;
+    dbg!(i);
+    let (i, release) = opt(map_parser(release, version_segment_parse)).parse(i)?;
+
+    Ok((i, (epoch, version, release)))
+}
+
+#[inline]
+fn version_segment_parse(i: &str) -> IResult<&str, Vec<Result<&str, u64>>> {
+    many1(
+        terminated(
+            take_while1(|c: char| c.is_alphanum()),
+            satisfy(|c| !c.is_alphanumeric()),
+        )
+        .map(|segment| match u64::from_str(segment) {
+            Ok(n) => Err(n),
+            Err(_e) => Ok(segment),
+        }),
+    )
+    .parse(i)
+}
+
+#[test]
+fn test_version() {
+    let v1 = "2025.Q1.2-1";
+    let (_rem, (epoch, version, release)) = versionparse(v1).finish().unwrap();
+    assert!(epoch.is_none());
+    assert_eq!(version.len(), 3);
+    println!("{version:?}");
+    assert!(release.is_some());
+}
+
+#[test]
+fn test_versions() {
+    let i = new_interner();
+    let local = parse_localdb(i.clone()).unwrap();
+    let local = ("local", local);
+
+    let syncs =
+        ["core", "extra", "multilib"].map(|name| (name, parse_syncdb(i.clone(), name).unwrap()));
+
+    let i = i.borrow();
+
+    let mut error = 0;
+
+    for (_dbname, db) in std::iter::once(local).chain(syncs.into_iter()) {
+        for (_pkgname, pkg) in db.iter() {
+            let v = pkg.version.r(&i);
+            match versionparse(&v) {
+                Err(e) => {
+                    println!("error parsing {v} as version: {e}");
+                    error += 1;
+                }
+                Ok((i, r)) => {
+                    if !i.is_empty() {
+                        println!("{i} remaining after parsing {v} as {r:?}");
+                        error += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if error > 0 {
+        panic!("{error} errors while parsing version numbers");
+    }
 }
 
 #[test]
 fn test_update() {
     let ts = SystemTime::now();
-    update_candidates();
+    let i = new_interner();
+    let vers = update_candidates(&i);
+
+    let i = i.borrow();
+    for (dbname, from_name, from_version, to_name, to_version) in vers {
+        let from_name = from_name.r(&i);
+        let from_version = from_version.r(&i);
+        let to_name = to_name.r(&i);
+        let to_version = to_version.r(&i);
+
+        println!("upgrading {from_name} {from_version} to {to_name} {to_version} in {dbname}");
+    }
+
     let passed = SystemTime::now().duration_since(ts).unwrap();
     println!("update_candidates took {passed:?} seconds");
 }
