@@ -56,6 +56,7 @@ impl FromStr for Validation {
     }
 }
 
+#[derive(Copy, Clone)]
 pub enum Arch {
     X86_64,
     Any,
@@ -69,6 +70,15 @@ impl FromStr for Arch {
             "x86_64" => Ok(Self::X86_64),
             "any" => Ok(Self::Any),
             _ => Err(()),
+        }
+    }
+}
+
+impl Arch {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Arch::X86_64 => "x86_64",
+            Arch::Any => "any",
         }
     }
 }
@@ -306,15 +316,22 @@ pub fn parse_syncdb(i: Interner, name: &str) -> std::io::Result<HashMap<Istr, Pa
     Ok(pkgs)
 }
 
-pub fn update_candidates(i: &Interner) -> Vec<(&str, Istr, Istr, Istr, Istr)> {
+/// only gets upgrades, no new dependencies
+pub fn update_candidates<'db>(
+    i: &Interner,
+    dbs: &'db [&str],
+    ignore: &[Istr],
+) -> Vec<(&'db str, Istr, Istr, Istr, Istr, Istr)> {
     let local = parse_localdb(i.clone()).unwrap();
 
-    let syncs =
-        ["core", "extra", "multilib"].map(|name| (name, parse_syncdb(i.clone(), name).unwrap()));
+    let syncs: Vec<_> = dbs
+        .into_iter()
+        .map(|name| (name, parse_syncdb(i.clone(), name).unwrap()))
+        .collect();
     i.borrow_mut().shrink_to_fit();
     let i = i.borrow();
     let mut upgrades = Vec::new();
-    for (name, package) in local.iter() {
+    for (name, package) in local.iter().filter(|(s, _)| !ignore.contains(s)) {
         let package_version = package.version.r(&i);
         let package_version = versionparse(package_version).finish().unwrap();
         for (dbname, db) in &syncs {
@@ -331,11 +348,12 @@ pub fn update_candidates(i: &Interner) -> Vec<(&str, Istr, Istr, Istr, Istr)> {
 
                 if is_upgrade {
                     upgrades.push((
-                        *dbname,
+                        **dbname,
                         *name,
                         package.version,
                         *sync_name,
                         sync_package.version,
+                        sync_package.filename.unwrap(),
                     ));
                 }
             }
@@ -344,7 +362,7 @@ pub fn update_candidates(i: &Interner) -> Vec<(&str, Istr, Istr, Istr, Istr)> {
     upgrades
 }
 
-trait QuickResolve {
+pub trait QuickResolve {
     fn r<'i, I: Deref<Target = InnerInterner>>(self, i: &'i I) -> &'i str;
 }
 
@@ -491,10 +509,10 @@ fn test_versions() {
 fn test_update() {
     let ts = SystemTime::now();
     let i = new_interner();
-    let vers = update_candidates(&i);
+    let vers = update_candidates(&i, &["core", "extra", "multilib"], &[]);
 
     let i = i.borrow();
-    for (dbname, from_name, from_version, to_name, to_version) in vers {
+    for (dbname, from_name, from_version, to_name, to_version, _filename) in vers {
         let from_name = from_name.r(&i);
         let from_version = from_version.r(&i);
         let to_name = to_name.r(&i);
