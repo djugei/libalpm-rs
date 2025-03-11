@@ -37,6 +37,7 @@ pub fn new_interner() -> Interner {
     Rc::new(RefCell::new(i))
 }
 
+#[derive(Clone)]
 pub enum Validation {
     None = 1,
     Md5Sum = 1 << 1,
@@ -83,6 +84,7 @@ impl Arch {
     }
 }
 
+#[derive(Clone)]
 pub enum XData {
     Pkg,
     Split,
@@ -100,8 +102,9 @@ impl FromStr for XData {
     }
 }
 
+#[derive(Clone)]
 pub struct Package {
-    pub interner: Interner,
+    pub i: Interner,
     pub base: Istr,
     pub name: Istr,
     pub version: Istr,
@@ -122,7 +125,6 @@ pub struct Package {
     pub filename: Option<Istr>,
     pub md5sum: Option<[u8; 24]>,
     pub sha256sum: Option<[u8; 48]>,
-    //TODO: direct value
     pub pgpsig: Option<Istr>,
 
     pub provides: Option<Vec<Istr>>,
@@ -197,7 +199,7 @@ impl Package {
             replaces: intern_list("REPLACES", &mut ir).map(|l| l.into_iter().collect()),
             conflicts: intern_list("CONFLICTS", &mut ir),
             xdata: m.get("XDATA").map(|s| XData::from_str(s).unwrap()),
-            interner: ii,
+            i: ii,
         };
         #[cfg(debug_assertions)]
         {
@@ -321,7 +323,7 @@ pub fn update_candidates<'db>(
     i: &Interner,
     dbs: &'db [&str],
     ignore: &[Istr],
-) -> Vec<(&'db str, Istr, Istr, Istr, Istr, Istr)> {
+) -> Vec<(&'db str, Package, Package)> {
     let local = parse_localdb(i.clone()).unwrap();
 
     let syncs: Vec<_> = dbs
@@ -347,14 +349,7 @@ pub fn update_candidates<'db>(
                 };
 
                 if is_upgrade {
-                    upgrades.push((
-                        **dbname,
-                        *name,
-                        package.version,
-                        *sync_name,
-                        sync_package.version,
-                        sync_package.filename.unwrap(),
-                    ));
+                    upgrades.push((**dbname, package.clone(), sync_package.clone()));
                 }
             }
         }

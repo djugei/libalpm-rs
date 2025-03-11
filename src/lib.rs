@@ -6,8 +6,8 @@ pub mod db;
 /// Currently just panics when anything goes wrong.
 /// Ex: ```upgrade_urls(&["core", "extra", "multilib"])```
 ///
-/// (upgrade_url, (old_name, old_version), new_filename)
-pub fn upgrade_urls(db_filter: &[&str]) -> Vec<(String, (String, String), String)> {
+/// (upgrade_url, (old_name, old_version, old_arch), (new_name, new_version, new_filename))
+pub fn upgrade_urls(db_filter: &[&str]) -> Vec<(String, db::Package, db::Package)> {
     use db::QuickResolve;
     let (ignore, repos) = config::extract_relevant_config();
     let repo_names: Vec<&str> = repos
@@ -23,19 +23,15 @@ pub fn upgrade_urls(db_filter: &[&str]) -> Vec<(String, (String, String), String
     let ups = db::update_candidates(&i, &repo_names, &ignore);
     let i = i.borrow();
     let mut ret = Vec::new();
-    for (dbname, from_name, from_version, _to_name, _to_version, filename) in ups.into_iter() {
-        let filename = filename.r(&i);
+    for (dbname, from, to) in ups.into_iter() {
+        let filename = to.filename.unwrap().r(&i);
         let cache_file = format!("/var/cache/pacman/pkg/{filename}");
         let url = if std::fs::exists(&cache_file).unwrap() {
             format!("file://{cache_file}")
         } else {
             format!("{}/{filename}", repos[dbname])
         };
-        ret.push((
-            url,
-            (from_name.r(&i).to_owned(), from_version.r(&i).to_owned()),
-            filename.to_owned(),
-        ));
+        ret.push((url, from, to));
     }
     ret
 }
