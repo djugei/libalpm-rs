@@ -55,10 +55,15 @@ fn test_kv() {
     assert_eq!(kv("a\n=\nb"), Ok(("\n=\nb", ("a", None))));
 }
 
-fn key_value_map(i: &str) -> IResult<&str, HashMap<&str, Option<&str>>> {
+fn key_value_map(i: &str) -> IResult<&str, HashMap<&str, Vec<&str>>> {
     let mut i = iterator(i, terminated(kv, opt(multispace0)));
     // skip comments
-    let ret = i.by_ref().filter(|(n, _)| !n.starts_with('#')).collect();
+
+    let mut ret: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (k, v) in i.by_ref().filter(|(n, _)| !n.starts_with('#')) {
+        ret.entry(k).or_default().extend(v);
+    }
+
     i.finish().map(|(i, ())| (i, ret))
 }
 
@@ -66,14 +71,14 @@ fn key_value_map(i: &str) -> IResult<&str, HashMap<&str, Option<&str>>> {
 fn test_kvm() {
     let parse = key_value_map("a=b; b=c; d=e").unwrap();
     assert_eq!(parse.0, "");
-    assert_eq!(parse.1["a"], "b".into());
-    assert_eq!(parse.1["b"], "c".into());
-    assert_eq!(parse.1["d"], "e".into());
+    assert_eq!(parse.1["a"], vec!("b"));
+    assert_eq!(parse.1["b"], vec!("c"));
+    assert_eq!(parse.1["d"], vec!("e"));
     let parse = key_value_map("a=b\n b=c\n d=e").unwrap();
     assert_eq!(parse.0, "");
-    assert_eq!(parse.1["a"], "b".into());
-    assert_eq!(parse.1["b"], "c".into());
-    assert_eq!(parse.1["d"], "e".into());
+    assert_eq!(parse.1["a"], vec!("b"));
+    assert_eq!(parse.1["b"], vec!("c"));
+    assert_eq!(parse.1["d"], vec!("e"));
 }
 
 fn sec_kv_map(i: &str) -> IResult<&str, Config> {
@@ -86,12 +91,21 @@ fn sec_kv_map(i: &str) -> IResult<&str, Config> {
     i.finish().map(|(i, ())| (i, ret))
 }
 
-type Config<'c> = HashMap<&'c str, HashMap<&'c str, Option<&'c str>>>;
+/// Section -> (Key -> List<Value>)
+type Config<'c> = HashMap<&'c str, HashMap<&'c str, Vec<&'c str>>>;
 
 // Parses the string as a pacman-flavored ini file.
 // Key-Value pairs outside of an explicit section are retrievable under the "" section.
 fn parse_pacman_config(i: &str) -> Result<Config, nom::Err<nom::error::Error<&str>>> {
     sec_kv_map(i).map(|(_, v)| v)
+}
+
+fn try_remove_first<T>(mut vec: Vec<T>) -> Option<T> {
+    if vec.is_empty() {
+        None
+    } else {
+        Some(vec.remove(0))
+    }
 }
 
 /// Reads the pacman config and extracts relevant information.
@@ -101,7 +115,9 @@ fn parse_pacman_config(i: &str) -> Result<Config, nom::Err<nom::error::Error<&st
 pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
     let pacman_config = std::fs::read_to_string("/etc/pacman.conf").unwrap();
     let mut pacman_config = parse_pacman_config(&pacman_config).unwrap();
-    let arch = pacman_config["options"]["Architecture"].map(str::trim);
+    let arch = pacman_config["options"]["Architecture"]
+        .get(0)
+        .map(|s| s.trim());
     let arch = match arch {
         Some("auto") | None => std::env::consts::ARCH,
         Some("x86_64") => "x86_64",
@@ -109,7 +125,7 @@ pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
     };
     let ignores = pacman_config
         .get_mut("options")
-        .map(|m| m.remove("IgnorePkg").flatten())
+        .map(|m| m.remove("IgnorePkg").map(try_remove_first).flatten())
         .flatten();
     let ignores: Vec<String> = if let Some(ignores) = ignores {
         ignores
@@ -122,27 +138,34 @@ pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
     } else {
         Vec::new()
     };
-    let mut repos = std::collections::HashMap::new();
+    let mut repos = HashMap::new();
     for (k, mut v) in pacman_config {
         if k == "" || k == "options" {
             continue;
         }
         let server = v
             .remove("Server")
+            .map(try_remove_first)
             .flatten()
             .map(ToOwned::to_owned)
             .or_else(|| {
-                if let Some(i) = v.remove("Include").flatten() {
-                    let s = std::fs::read_to_string(i).unwrap();
-                    let mut inc = parse_pacman_config(&s).unwrap();
-                    inc.get_mut("")
-                        .unwrap()
-                        .remove("Server")
-                        .flatten()
-                        .map(ToOwned::to_owned)
-                } else {
-                    None
-                }
+                v.remove("Include")
+                    .map(|v| {
+                        v.into_iter()
+                            .map(|i| {
+                                let s = std::fs::read_to_string(i).unwrap();
+                                let mut inc = parse_pacman_config(&s).unwrap();
+                                inc.get_mut("")
+                                    .unwrap()
+                                    .remove("Server")
+                                    .map(try_remove_first)
+                                    .flatten()
+                                    .map(ToOwned::to_owned)
+                            })
+                            .flatten()
+                            .next()
+                    })
+                    .flatten()
             })
             .unwrap();
         let server = server.replace("$arch", arch).replace("$repo", k);
@@ -154,12 +177,13 @@ pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
 
 #[test]
 fn test_sec_kv_map() {
-    let parse = sec_kv_map("a=0\n#b=9\n\n[a]a=1;b=2;c=3\n[b]a=-1;b=-2;c=-3\n");
+    let parse = sec_kv_map("a=0\n#b=9\n\n[a]a=1;b=2;c=3\n[b]a=-1;b=-2;c=-3\n[c]a=1;a=2");
     dbg!(&parse);
     use nom::Finish;
     let parse = parse.finish().unwrap();
-    assert_eq!(parse.1["a"]["c"], "3".into());
-    assert_eq!(parse.1["b"]["c"], "-3".into());
+    assert_eq!(parse.1["a"]["c"], vec!("3"));
+    assert_eq!(parse.1["b"]["c"], vec!("-3"));
+    assert_eq!(parse.1["c"]["a"], vec!("1", "2"));
 }
 
 #[test]
