@@ -46,13 +46,13 @@ pub enum Validation {
 }
 
 impl FromStr for Validation {
-    type Err = ();
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "none" => Ok(Self::None),
             "pgp" => Ok(Self::Signature),
-            _ => Err(()),
+            s => Err(format!("unimplemented validation: {}", s)),
         }
     }
 }
@@ -91,13 +91,13 @@ pub enum XData {
 }
 
 impl FromStr for XData {
-    type Err = ();
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "pkgtype=pkg" => Ok(Self::Pkg),
             "pkgtype=split" => Ok(Self::Split),
-            _ => Err(()),
+            s => Err(format!("unknown package type {}", s)),
         }
     }
 }
