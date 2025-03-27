@@ -51,8 +51,10 @@ impl FromStr for Validation {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "none" => Ok(Self::None),
+            "md5" => Ok(Self::Md5Sum),
+            "sha256" => Ok(Self::Sha256Sum),
             "pgp" => Ok(Self::Signature),
-            s => Err(format!("unimplemented validation: {}", s)),
+            s => Err(format!("Unsupported validation: {}", s)),
         }
     }
 }
