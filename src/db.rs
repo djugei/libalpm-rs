@@ -85,9 +85,12 @@ impl Arch {
 }
 
 #[derive(Clone)]
+// TODO: Possibly just keep this as a string/don't keep it at all
+// its unclear to me what even uses this data.
 pub enum XData {
     Pkg,
     Split,
+    Debug,
 }
 
 impl FromStr for XData {
@@ -97,6 +100,7 @@ impl FromStr for XData {
         match s {
             "pkgtype=pkg" => Ok(Self::Pkg),
             "pkgtype=split" => Ok(Self::Split),
+            "pkgtype=debug" => Ok(Self::Debug),
             s => Err(format!("unknown package type {}", s)),
         }
     }
