@@ -13,6 +13,8 @@ base64 = "*"
 flate2 = "*"
 tar = "*"
 
+log = "*"
+
 [dev-dependencies]
 bytesize = "*"
 

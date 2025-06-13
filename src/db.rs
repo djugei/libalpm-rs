@@ -9,10 +9,8 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use base64::Engine;
 use base64::prelude::BASE64_STANDARD_NO_PAD as B64;
-use nom::AsChar;
-use nom::Finish;
+use base64::Engine;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_until;
 use nom::bytes::complete::take_while;
@@ -25,6 +23,8 @@ use nom::multi::many1;
 use nom::multi::separated_list0;
 use nom::sequence::terminated;
 use nom::sequence::{delimited, pair};
+use nom::AsChar;
+use nom::Finish;
 use nom::{IResult, Parser};
 use string_interner::DefaultStringInterner;
 use string_interner::DefaultSymbol as Istr;
@@ -347,7 +347,20 @@ pub fn update_candidates<'db>(
                 let is_upgrade = if *sync_name == *name {
                     let sync_package_version = sync_package.version.r(&i);
                     let sync_package_version = versionparse(sync_package_version).finish().unwrap();
-                    package_version < sync_package_version
+                    match package_version.cmp(&sync_package_version) {
+                        std::cmp::Ordering::Less => true,
+                        std::cmp::Ordering::Equal => false,
+                        std::cmp::Ordering::Greater => {
+                            use log;
+                            log::warn!(
+                                "downgrade? {:?}: {:?} to {:?}",
+                                name,
+                                package_version,
+                                sync_package_version
+                            );
+                            false
+                        }
+                    }
                 } else if let Some(r) = &sync_package.replaces {
                     r.contains(name)
                 } else {
