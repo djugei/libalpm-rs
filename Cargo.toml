@@ -17,6 +17,7 @@ log = "*"
 
 [dev-dependencies]
 bytesize = "*"
+alpm = "*"
 
 [profile.dev]
 opt-level = 1
