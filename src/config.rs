@@ -116,7 +116,7 @@ pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
     let pacman_config = std::fs::read_to_string("/etc/pacman.conf").unwrap();
     let mut pacman_config = parse_pacman_config(&pacman_config).unwrap();
     let arch = pacman_config["options"]["Architecture"]
-        .get(0)
+        .first()
         .map(|s| s.trim());
     let arch = match arch {
         Some("auto") | None => std::env::consts::ARCH,
@@ -125,8 +125,7 @@ pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
     };
     let ignores = pacman_config
         .get_mut("options")
-        .map(|m| m.remove("IgnorePkg").map(try_remove_first).flatten())
-        .flatten();
+        .and_then(|m| m.remove("IgnorePkg").and_then(try_remove_first));
     let ignores: Vec<String> = if let Some(ignores) = ignores {
         ignores
             .trim()
@@ -140,32 +139,27 @@ pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
     };
     let mut repos = HashMap::new();
     for (k, mut v) in pacman_config {
-        if k == "" || k == "options" {
+        if k.is_empty() || k == "options" {
             continue;
         }
         let server = v
             .remove("Server")
-            .map(try_remove_first)
-            .flatten()
+            .and_then(try_remove_first)
             .map(ToOwned::to_owned)
             .or_else(|| {
-                v.remove("Include")
-                    .map(|v| {
-                        v.into_iter()
-                            .map(|i| {
-                                let s = std::fs::read_to_string(i).unwrap();
-                                let mut inc = parse_pacman_config(&s).unwrap();
-                                inc.get_mut("")
-                                    .unwrap()
-                                    .remove("Server")
-                                    .map(try_remove_first)
-                                    .flatten()
-                                    .map(ToOwned::to_owned)
-                            })
-                            .flatten()
-                            .next()
-                    })
-                    .flatten()
+                v.remove("Include").and_then(|v| {
+                    v.into_iter()
+                        .filter_map(|i| {
+                            let s = std::fs::read_to_string(i).unwrap();
+                            let mut inc = parse_pacman_config(&s).unwrap();
+                            inc.get_mut("")
+                                .unwrap()
+                                .remove("Server")
+                                .and_then(try_remove_first)
+                                .map(ToOwned::to_owned)
+                        })
+                        .next()
+                })
             })
             .unwrap();
         let server = server.replace("$arch", arch).replace("$repo", k);

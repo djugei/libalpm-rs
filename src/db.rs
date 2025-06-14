@@ -265,8 +265,8 @@ pub fn parse_to_map(i: &str) -> Result<HashMap<&str, &str>, nom::Err<Error<&str>
     Ok(h)
 }
 
-const LOCAL_DBPATH: &'static str = "/var/lib/pacman/local/";
-const SYNC_DBPATH: &'static str = "/var/lib/pacman/sync/";
+const LOCAL_DBPATH: &str = "/var/lib/pacman/local/";
+const SYNC_DBPATH: &str = "/var/lib/pacman/sync/";
 
 /// returns name -> package
 pub fn parse_localdb(i: Interner) -> std::io::Result<HashMap<Istr, Package>> {
@@ -319,7 +319,7 @@ pub fn parse_syncdb(i: Interner, name: &str) -> std::io::Result<HashMap<Istr, Pa
         let slice = &archive[start..end];
         let s = std::str::from_utf8(slice).unwrap();
 
-        let pkg = Package::from_str(i.clone(), &s).expect("package parsing failed");
+        let pkg = Package::from_str(i.clone(), s).expect("package parsing failed");
         pkgs.insert(pkg.name, pkg);
     }
 
@@ -335,7 +335,7 @@ pub fn update_candidates<'db>(
     let local = parse_localdb(i.clone()).unwrap();
 
     let syncs: Vec<_> = dbs
-        .into_iter()
+        .iter()
         .map(|name| (name, parse_syncdb(i.clone(), name).unwrap()))
         .collect();
     i.borrow_mut().shrink_to_fit();
@@ -379,11 +379,11 @@ pub fn update_candidates<'db>(
 }
 
 pub trait QuickResolve {
-    fn r<'i, I: Deref<Target = InnerInterner>>(self, i: &'i I) -> &'i str;
+    fn r<I: Deref<Target = InnerInterner>>(self, i: &I) -> &str;
 }
 
 impl QuickResolve for Istr {
-    fn r<'i, I: Deref<Target = InnerInterner>>(self, i: &'i I) -> &'i str {
+    fn r<I: Deref<Target = InnerInterner>>(self, i: &I) -> &str {
         i.deref().resolve(self).unwrap()
     }
 }
@@ -399,7 +399,7 @@ type Version<'v> = (
 pub fn versionparse(i: &str) -> IResult<&str, Version, ()> {
     let epoch = (take_while(|c: char| c.is_numeric()), char(':'))
         .map(|i| i.0)
-        .map_res(|s| u64::from_str(s));
+        .map_res(u64::from_str);
     let (i, epoch) = opt(epoch).parse(i)?;
 
     let (pre, post) = if let Some((pre, post)) = i.rsplit_once('-') {
