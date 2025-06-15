@@ -437,6 +437,35 @@ pub fn versioncmp(a: &str, b: &str) -> std::cmp::Ordering {
     va.cmp(&vb)
 }
 
+/// auto-unlocks on drop
+pub struct DBLock(#[allow(dead_code)] std::fs::File);
+
+impl DBLock {
+    pub fn new() -> Result<Self, ()> {
+        match std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .read(false)
+            .open("/var/lib/pacman/db.lck")
+        {
+            Ok(f) => Ok(Self(f)),
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    Err(())
+                } else {
+                    panic!("unexpected error while locking database");
+                }
+            }
+        }
+    }
+}
+
+impl Drop for DBLock {
+    fn drop(&mut self) {
+        std::fs::remove_file("/var/lib/pacman/db.lck").expect("error unlocking database")
+    }
+}
+
 #[test]
 fn test_version() {
     let v1 = "2025.Q1.2-1";
