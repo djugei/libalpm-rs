@@ -81,7 +81,7 @@ fn test_kvm() {
     assert_eq!(parse.1["d"], vec!("e"));
 }
 
-fn sec_kv_map(i: &str) -> IResult<&str, Config> {
+fn sec_kv_map(i: &str) -> IResult<&str, Config<'_>> {
     let (i, prelude) = opt(key_value_map).parse(i)?;
     let mut i = iterator(i, (terminated(section, opt(multispace0)), key_value_map));
     let mut ret: HashMap<_, _> = i.by_ref().collect();
@@ -96,7 +96,7 @@ type Config<'c> = HashMap<&'c str, HashMap<&'c str, Vec<&'c str>>>;
 
 // Parses the string as a pacman-flavored ini file.
 // Key-Value pairs outside of an explicit section are retrievable under the "" section.
-fn parse_pacman_config(i: &str) -> Result<Config, nom::Err<nom::error::Error<&str>>> {
+fn parse_pacman_config(i: &str) -> Result<Config<'_>, nom::Err<nom::error::Error<&str>>> {
     sec_kv_map(i).map(|(_, v)| v)
 }
 

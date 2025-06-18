@@ -399,7 +399,7 @@ type Version<'v> = (
 
 //TODO: do not allocate, this is pretty wasteful overall!
 #[inline(always)]
-pub fn versionparse(i: &str) -> IResult<&str, Version, ()> {
+pub fn versionparse(i: &str) -> IResult<&str, Version<'_>, ()> {
     let epoch = (take_while(|c: char| c.is_numeric()), char(':'))
         .map(|i| i.0)
         .map_res(u64::from_str);
