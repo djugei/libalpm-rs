@@ -186,6 +186,9 @@ impl Package {
             csize: m.get("CSIZE").map(|s| u64::from_str(s).unwrap()),
             validation: m
                 .get("VALIDATION")
+                // Apparently some faulty packages have multiple validations listed,
+                // just take the first one in that case.
+                .map(|s| s.split_once('\n').map(|t|t.0).unwrap_or(s))
                 .map(|s| Validation::from_str(s).unwrap()),
             filename: intern("FILENAME", &mut ir),
             md5sum: m
