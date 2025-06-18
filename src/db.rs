@@ -55,7 +55,7 @@ impl FromStr for Validation {
             "md5" => Ok(Self::Md5Sum),
             "sha256" => Ok(Self::Sha256Sum),
             "pgp" => Ok(Self::Signature),
-            s => Err(format!("Unsupported validation: {}", s)),
+            s => Err(format!("Unsupported validation: {s}")),
         }
     }
 }
@@ -104,7 +104,7 @@ impl FromStr for XData {
             "pkgtype=pkg" => Ok(Self::Pkg),
             "pkgtype=split" => Ok(Self::Split),
             "pkgtype=debug" => Ok(Self::Debug),
-            s => Err(format!("unknown package type {}", s)),
+            s => Err(format!("unknown package type {s}")),
         }
     }
 }
@@ -358,10 +358,7 @@ pub fn update_candidates<'db>(
                         std::cmp::Ordering::Greater => {
                             use log;
                             log::warn!(
-                                "downgrade? {:?}: {:?} to {:?}",
-                                name,
-                                package_version,
-                                sync_package_version
+                                "downgrade? {name:?}: {package_version:?} to {sync_package_version:?}",
                             );
                             false
                         }
