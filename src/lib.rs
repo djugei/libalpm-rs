@@ -1,5 +1,6 @@
 pub mod config;
 pub mod db;
+pub mod util;
 
 /// Calculates which packages need upgrades,
 /// limited to the databases passed in with db_filter.
