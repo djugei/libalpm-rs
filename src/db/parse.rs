@@ -154,9 +154,82 @@ pub struct Package {
     pub xdata: Option<XData>,
 }
 
+#[derive(Clone)]
+pub struct MissingFieldError {
+    i: Interner,
+    base: Option<Istr>,
+    field: MissingField,
+}
+
+impl MissingFieldError {
+    fn new(i: Interner, base: Option<Istr>, field: MissingField) -> Self {
+        Self { i, base, field }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+enum MissingField {
+    Base,
+    Name,
+    Version,
+    Arch,
+    Packager,
+    BuildDate,
+    Url,
+    License,
+    Desc,
+}
+
+impl MissingField {
+    fn as_str(&self) -> &'static str {
+        match self {
+            MissingField::Base => "base",
+            MissingField::Name => "name",
+            MissingField::Version => "version",
+            MissingField::Arch => "arch",
+            MissingField::Packager => "url",
+            MissingField::BuildDate => "builddate",
+            MissingField::Url => "url",
+            MissingField::License => "license",
+            MissingField::Desc => "desc",
+        }
+    }
+}
+
+impl std::fmt::Display for MissingFieldError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(base) = self.base {
+            write!(
+                f,
+                "Tried to parse {} but {} was missing",
+                base.r(&self.i.borrow()),
+                self.field.as_str()
+            )
+        } else {
+            write!(f, "Tried to parse package but it did not have a base")
+        }
+    }
+}
+
+impl std::fmt::Debug for MissingFieldError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct MissingFieldError<'a> {
+            base: Option<&'a str>,
+            field: &'a MissingField,
+        }
+        let ii = self.i.borrow();
+        let mf = MissingFieldError {
+            base: self.base.map(|s| s.r(&ii)),
+            field: &self.field,
+        };
+        std::fmt::Debug::fmt(&mf, f)
+    }
+}
+
 impl Package {
-    //TODO: custom error type, no more unwraps
-    pub fn from_str(i: Interner, s: &str) -> Result<Self, ()> {
+    pub fn from_str(i: Interner, s: &str) -> Result<Self, MissingFieldError> {
         use std::cell::RefMut;
         let m = parse_to_map(s).unwrap();
         //TODO: clone can be avoided if the package construction is done in 2 steps
@@ -175,18 +248,42 @@ impl Package {
                     .collect::<Vec<_>>()
             })
         };
+
+        use MissingField as MF;
+        use MissingFieldError as MFE;
+
+        let base = intern("BASE", &mut ir).ok_or(MFE::new(i.clone(), None, MF::Base))?;
         let s = Self {
-            base: intern("BASE", &mut ir).unwrap(),
-            name: intern("NAME", &mut ir).unwrap(),
-            version: intern("VERSION", &mut ir).unwrap(),
-            arch: m.get("ARCH").map(|s| Arch::from_str(s).unwrap()).unwrap(),
+            base,
+            name: intern("NAME", &mut ir).ok_or(MFE::new(i.clone(), base.into(), MF::Name))?,
+            version: intern("VERSION", &mut ir).ok_or(MFE::new(
+                i.clone(),
+                base.into(),
+                MF::Version,
+            ))?,
+            arch: m
+                .get("ARCH")
+                .map(|s| Arch::from_str(s).unwrap())
+                .ok_or(MFE::new(i.clone(), base.into(), MF::Arch))?,
             reason: m.get("REASON").map(|s| u8::from_str(s).unwrap()),
             install_date: m.get("INSTALLDATE").map(str_to_systemtime),
-            packager: intern("PACKAGER", &mut ir).unwrap(),
-            build_date: m.get("BUILDDATE").map(str_to_systemtime).unwrap(),
-            url: intern("URL", &mut ir).unwrap(),
-            license: intern_list("LICENSE", &mut ir).unwrap(),
-            desc: intern("DESC", &mut ir).unwrap(),
+            packager: intern("PACKAGER", &mut ir).ok_or(MFE::new(
+                i.clone(),
+                base.into(),
+                MF::Packager,
+            ))?,
+            build_date: m.get("BUILDDATE").map(str_to_systemtime).ok_or(MFE::new(
+                i.clone(),
+                base.into(),
+                MF::BuildDate,
+            ))?,
+            url: intern("URL", &mut ir).ok_or(MFE::new(i.clone(), base.into(), MF::Url))?,
+            license: intern_list("LICENSE", &mut ir).ok_or(MFE::new(
+                i.clone(),
+                base.into(),
+                MF::License,
+            ))?,
+            desc: intern("DESC", &mut ir).ok_or(MFE::new(i.clone(), base.into(), MF::Desc))?,
             isize: m
                 .get("SIZE")
                 .or_else(|| m.get("ISIZE"))
