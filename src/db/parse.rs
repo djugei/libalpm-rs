@@ -134,7 +134,7 @@ pub struct Package {
     pub isize: Option<u64>,
     pub csize: Option<u64>,
     pub build_date: SystemTime,
-    pub url: Istr,
+    pub url: Option<Istr>,
     pub license: Vec<Istr>,
     pub desc: Istr,
     pub filename: Option<Istr>,
@@ -277,7 +277,7 @@ impl Package {
                 base.into(),
                 MF::BuildDate,
             ))?,
-            url: intern("URL", &mut ir).ok_or(MFE::new(i.clone(), base.into(), MF::Url))?,
+            url: intern("URL", &mut ir), /*.ok_or(MFE::new(i.clone(), base.into(), MF::Url))?*/
             license: intern_list("LICENSE", &mut ir).ok_or(MFE::new(
                 i.clone(),
                 base.into(),
