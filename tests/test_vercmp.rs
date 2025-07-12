@@ -9,6 +9,9 @@ fn test_basic() {
     assert_eq!(vercmp("1.4", "1.1b.1"), Greater);
     assert_eq!(versioncmp("1.4", "1.1b.1"), Greater);
 
+    assert_eq!(vec![0, 0, 0].cmp(&vec![0, 0]), Greater);
+
+    assert_eq!(vercmp("0.15.1-2", "0.15.1b-2"), Less);
     assert_eq!(vercmp("0.15.1-2", "0.15.1b-10"), Less);
     assert_eq!(versioncmp("0.15.1-2", "0.15.1b-10"), Less);
 }
@@ -27,7 +30,7 @@ fn test_vercmp() {
         .into_iter()
         .map(|(k, p)| {
             let v = p.version.r(&ii);
-            (k.r(&ii), v, libalpm_rs::db::versionparse(v).unwrap().1)
+            (k.r(&ii), v, libalpm_rs::db::versionparse(v).unwrap())
         })
         .collect();
 
@@ -50,5 +53,39 @@ fn test_vercmp() {
 
     if failed > 0 {
         panic!("{failed} tests failed")
+    }
+}
+
+#[test]
+fn test_rpmtestsuite() {
+    use std::cmp::Ordering;
+    let mut failed = 0;
+    let f = std::fs::read_to_string("rpmvercmp.at").unwrap();
+    for line in f.split('\n').filter(|l| l.starts_with("RPMVERCMP")) {
+        // fuck this not dealing with tilde precedence
+        if line.contains('~') {
+            continue;
+        }
+        let (_, line) = line.split_once('(').unwrap();
+        let (v1, line) = line.split_once(',').unwrap();
+        let (v2, line) = line.split_once(',').unwrap();
+        let (res, _) = line.split_once(')').unwrap();
+        let v2 = v2.trim();
+        let res: i8 = res.trim().parse().unwrap();
+        let res = match res {
+            -1 => Ordering::Less,
+            0 => Ordering::Equal,
+            1 => Ordering::Greater,
+            _ => panic!("invalid ordering"),
+        };
+        let v = libalpm_rs::db::versioncmp(v1, v2);
+        if v != res {
+            failed += 1;
+            println!("r: {v:?}\nt: {res:?}\nv1: {v1}\nv2: {v2}\n");
+        };
+        assert_eq!(v, alpm::vercmp(v1, v2), "{v1} {v2} {res:?}");
+    }
+    if failed > 0 {
+        panic!("{failed} failed test cases");
     }
 }

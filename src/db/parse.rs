@@ -21,7 +21,7 @@ use nom::character::complete::satisfy;
 use nom::character::complete::{alphanumeric1, char, newline};
 use nom::combinator::opt;
 use nom::error::Error;
-use nom::multi::many1;
+use nom::multi::many0;
 use nom::multi::separated_list0;
 use nom::sequence::terminated;
 use nom::sequence::{delimited, pair};
@@ -276,11 +276,10 @@ pub fn parse_to_map(i: &str) -> Result<HashMap<&str, &str>, nom::Err<Error<&str>
     Ok(h)
 }
 
-type Version<'v> = (
-    Option<u64>,
-    Vec<Result<&'v str, u64>>,
-    Option<Vec<Result<&'v str, u64>>>,
-);
+type Version<'v> = (Option<u64>, VersionSegment<'v>, Option<VersionSegment<'v>>);
+
+type VersionSegment<'v> = Vec<VersionElement<'v>>;
+type VersionElement<'v> = Result<&'v str, u64>;
 
 //TODO: do not allocate, this is pretty wasteful overall!
 #[inline(always)]
@@ -308,8 +307,9 @@ pub fn versionparse(i: &str) -> Result<Version<'_>, ()> {
 }
 
 #[inline(always)]
-fn version_segment_parse(i: &str) -> IResult<&str, Vec<Result<&str, u64>>, ()> {
-    many1(
+fn version_segment_parse(i: &str) -> IResult<&str, VersionSegment<'_>, ()> {
+    let (i, _) = many0(satisfy(|c| !c.is_alphanumeric())).parse(i)?;
+    many0(
         terminated(
             alt((alpha1, digit1)),
             opt(satisfy(|c| !c.is_alphanumeric())),
@@ -321,6 +321,7 @@ fn version_segment_parse(i: &str) -> IResult<&str, Vec<Result<&str, u64>>, ()> {
     )
     .parse(i)
 }
+
 #[test]
 fn test_version() {
     let v1 = "2025.Q1.2-1";
