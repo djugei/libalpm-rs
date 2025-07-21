@@ -8,17 +8,21 @@ pub mod util;
 /// Ex: ```upgrade_urls(&["core", "extra", "multilib"])```
 ///
 /// (upgrade_url, (old_name, old_version, old_arch), (new_name, new_version, new_filename))
-pub fn upgrade_urls(db_filter: &[&str]) -> Vec<(String, db::Package, db::Package)> {
+pub fn upgrade_urls(
+    config: &config::PacmanConfig,
+    db_filter: &[&str],
+) -> Vec<(String, db::Package, db::Package)> {
     use db::QuickResolve;
-    let (ignore, repos) = config::extract_relevant_config();
-    let repo_names: Vec<&str> = repos
+    let repo_names: Vec<&str> = config
+        .repo_urls
         .keys()
         .map(String::as_str)
         .filter(|r| db_filter.contains(r))
         .collect();
     let i = db::new_interner();
-    let ignore: Vec<_> = ignore
-        .into_iter()
+    let ignore: Vec<_> = config
+        .ignores
+        .iter()
         .map(|s| i.borrow_mut().get_or_intern(s.trim()))
         .collect();
     let ups = db::update_candidates(&i, &repo_names, &ignore);
@@ -30,7 +34,7 @@ pub fn upgrade_urls(db_filter: &[&str]) -> Vec<(String, db::Package, db::Package
         let url = if std::fs::exists(&cache_file).unwrap() {
             format!("file://{cache_file}")
         } else {
-            format!("{}/{filename}", repos[dbname])
+            format!("{}/{filename}", config.repo_urls[dbname])
         };
         ret.push((url, from, to));
     }
@@ -40,7 +44,9 @@ pub fn upgrade_urls(db_filter: &[&str]) -> Vec<(String, db::Package, db::Package
 #[test]
 fn test_upgrade_urls() {
     let ts = std::time::SystemTime::now();
-    for (u, _, _) in upgrade_urls(&["core", "extra", "multilib"]) {
+    let config = config::extract_relevant_config();
+
+    for (u, _, _) in upgrade_urls(&config, &["core", "extra", "multilib"]) {
         println!("{}", u);
     }
     let passed = std::time::SystemTime::now().duration_since(ts).unwrap();

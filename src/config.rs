@@ -17,11 +17,19 @@ fn try_remove_first<T>(mut vec: Vec<T>) -> Option<T> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct PacmanConfig {
+    pub ignores: Vec<String>,
+    /// repo -> url
+    pub repo_urls: HashMap<String, String>,
+    pub cache_dir: std::path::PathBuf,
+    pub db_path: std::path::PathBuf,
+}
+
 /// Reads the pacman config and extracts relevant information.
 /// Resolves one level of Include.
 /// Does not support glob syntax in includes.
-/// ret: (list of ignored packages, repo -> url)
-pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
+pub fn extract_relevant_config() -> PacmanConfig {
     let pacman_config = std::fs::read_to_string("/etc/pacman.conf").unwrap();
     let mut pacman_config = parse_pacman_config(&pacman_config).unwrap();
     let arch = pacman_config["options"]["Architecture"]
@@ -34,7 +42,8 @@ pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
     };
     let ignores = pacman_config
         .get_mut("options")
-        .and_then(|m| m.remove("IgnorePkg").and_then(try_remove_first));
+        .and_then(|m| m.remove("IgnorePkg"))
+        .and_then(try_remove_first);
     let ignores: Vec<String> = if let Some(ignores) = ignores {
         ignores
             .trim()
@@ -46,6 +55,16 @@ pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
     } else {
         Vec::new()
     };
+    let db_path = pacman_config
+        .get_mut("options")
+        .and_then(|m| m.remove("DBPath"))
+        .and_then(try_remove_first)
+        .unwrap_or_else(|| "/var/lib/pacman/");
+    let cache_dir = pacman_config
+        .get_mut("options")
+        .and_then(|m| m.remove("CacheDir"))
+        .and_then(try_remove_first)
+        .unwrap_or_else(|| "/var/cache/pacman/pkg");
     let mut repos = HashMap::new();
     for (k, mut v) in pacman_config {
         if k.is_empty() || k == "options" {
@@ -75,7 +94,12 @@ pub fn extract_relevant_config() -> (Vec<String>, HashMap<String, String>) {
         repos.insert(k.to_owned(), server);
     }
 
-    (ignores, repos)
+    PacmanConfig {
+        ignores,
+        repo_urls: repos,
+        db_path: db_path.to_owned().into(),
+        cache_dir: cache_dir.to_owned().into(),
+    }
 }
 
 #[test]
