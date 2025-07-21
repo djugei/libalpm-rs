@@ -1,4 +1,5 @@
 mod parse;
+use log::debug;
 pub use parse::new_interner;
 pub use parse::{Interner, Istr, Package, QuickResolve};
 pub use parse::{versioncmp, versionparse};
@@ -9,6 +10,7 @@ const SYNC_DBPATH: &str = "/var/lib/pacman/sync/";
 
 /// returns name -> package
 pub fn parse_localdb(i: Interner) -> std::io::Result<HashMap<Istr, Package>> {
+    debug!("parsing localdb");
     let v = std::fs::read(format!("{LOCAL_DBPATH}/ALPM_DB_VERSION"))?;
     let e = "invalid version";
     let v = String::from_utf8(v).expect(e);
@@ -28,6 +30,7 @@ pub fn parse_localdb(i: Interner) -> std::io::Result<HashMap<Istr, Package>> {
         s.clear();
         desc.read_to_string(&mut s)?;
 
+        debug!("parsing {}", dir.path().display());
         let pkg = Package::from_str(i.clone(), &s).unwrap();
         pkgs.insert(pkg.name, pkg);
     }
@@ -35,6 +38,7 @@ pub fn parse_localdb(i: Interner) -> std::io::Result<HashMap<Istr, Package>> {
 }
 
 pub fn parse_syncdb(i: Interner, name: &str) -> std::io::Result<HashMap<Istr, Package>> {
+    debug!("parsing sync db {name}");
     let dbfile = format!("{SYNC_DBPATH}/{name}.db");
     let dbfile = std::fs::File::open(dbfile)?;
     let mut dbfile = flate2::read::GzDecoder::new(dbfile);
