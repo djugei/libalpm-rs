@@ -30,9 +30,9 @@ pub fn upgrade_urls(
     let mut ret = Vec::new();
     for (dbname, from, to) in ups.into_iter() {
         let filename = to.filename.unwrap().r(&i);
-        let cache_file = format!("/var/cache/pacman/pkg/{filename}");
+        let cache_file = config.cache_dir.join(filename);
         let url = if std::fs::exists(&cache_file).unwrap() {
-            format!("file://{cache_file}")
+            format!("file://{}", cache_file.to_string_lossy())
         } else {
             format!("{}/{filename}", config.repo_urls[dbname])
         };
