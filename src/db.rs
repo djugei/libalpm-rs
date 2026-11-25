@@ -122,6 +122,7 @@ pub fn update_candidates<'db>(
 pub struct DBLock(#[allow(dead_code)] std::fs::File);
 
 impl DBLock {
+    #[must_use]
     pub fn new() -> Result<Self, ()> {
         match std::fs::OpenOptions::new()
             .create_new(true)
